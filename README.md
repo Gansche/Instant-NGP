@@ -1,3 +1,34 @@
 # Instant-NGP
-Reproduction of paper Instant Neural Graphics Primitives 
+
+Reproduction of paper Instant Neural Graphics Primitives
+
 ZJU CG2023 Final Project
+
+
+**Warning**
+
+1. 服务器随时可能关停 每次写完务必上传GitHub (除了data/以外 已添加到gitignore)
+
+2. conda 环境用 neus
+
+   ```bash
+   conda activate neus
+   ```
+
+
+**TODO List**
+
+- [x] 摸清楚数据集结构 热狗模型的数据集 找两三个出来用
+- [ ] 其实可以先写dataset
+- [ ] 写主要的模型
+- [ ] 写loss
+- [ ] 调试以后写train
+- [ ] run!
+- [ ] 自采数据集 colmap标定 需要读colmap
+
+
+
+1. 第一阶段实现文章中提到的编码方式以及用一种数据集就可以了
+2. 数据集就用热狗 好比较
+3. 方法比较以及换数据集有空再说 没空就算
+
