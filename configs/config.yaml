@@ -1,2 +1,6 @@
 data:
   type: nerf_synthesic
+
+trainer:
+
+loss:

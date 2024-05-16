@@ -15,11 +15,18 @@ ZJU CG2023 Final Project
    conda activate neus
    ```
 
+3. debug 用cuda:3
+
+    ```bash
+    python ./scripts/debug.py
+    ```
+
 
 **TODO List**
 
 - [x] 摸清楚数据集结构 热狗模型的数据集 找两三个出来用
-- [ ] 其实可以先写dataset
+- [x] 其实可以先写dataset
+    - 数据集写了能加载数据 但是跟没写一样，因为不知道后面咋用
 - [ ] 写主要的模型
 - [ ] 写loss
 - [ ] 调试以后写train
