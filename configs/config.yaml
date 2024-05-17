@@ -1,6 +1,27 @@
 data:
   type: nerf_synthesic
 
+encoder:
+  arch: hash_grid
+
+decoder:
+  arch: simple_nerf
+
+  nerf:
+    sigma_net:
+
+    color_net:
+
+  simple_nerf:
+    sigma_net:
+      num_layers: 2
+      hidden_dim: 64
+      out_dim: 16
+    color_net:
+      num_layers: 3
+      hidden_dim: 64
+      out_dim: 3
+
 trainer:
 
 loss:

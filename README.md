@@ -21,6 +21,9 @@ ZJU CG2023 Final Project
     python ./scripts/debug.py
     ```
 
+4. torch.version.cuda = 1.11.0+cu102
+
+    其他environment待整理
 
 **TODO List**
 

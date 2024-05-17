@@ -2,7 +2,7 @@ import os
 import pdb
 import yaml
 import json
-from dataset.dataset import make_dataset
+from lib.dataset import make_dataset
 
 with open('configs/config.yaml','r') as file:
     config = yaml.safe_load(file)
