@@ -1,3 +1,5 @@
+import math
+
 import torch
 import torch.nn as nn
 
@@ -24,10 +26,28 @@ class InstantNGP(nn.Module):
         pass
 
 class HashGridEncoder(nn.Module):
-    def __init__(self) -> None:
+    def __init__(self, cfg_enc) -> None:
         super(HashGridEncoder, self).__init__()
+        self.L = cfg_enc['L']
+        self.T = int(math.pow(2, cfg_enc['log2T']))
+        self.F = int(cfg_enc['F'])
+        self.N_min = cfg_enc['N_min']
+        self.N_max = cfg_enc['N_max']
+        self.b = math.exp(math.log(self.N_max) - math.log(self.N_min) / (self.L - 1))
+
+        hash_grids = []
+        resolutions = []
+        for i in range(self.L):
+            hash_grids.append(nn.Embedding(self.T, self.F))
+            resolutions.append(math.floor(self.N_min * math.pow(self.b, i)))
+        self.hash_grids = nn.ModuleList(hash_grids)
+        self.resolutions = resolutions
         
     def forward(self, x):
+        """
+        Args:
+            x (tensor): input position
+        """
         pass
     
 class FrequencyEncoder(nn.Module):
