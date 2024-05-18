@@ -1,11 +1,15 @@
 import os
 import json
+import math
 import imageio 
+import random
+import pdb
 
+import torch
 from torch.utils.data import Dataset
 
 class NeRFSynthesicDataset(Dataset):
-    def __init__(self, data_path, split='train'):
+    def __init__(self, data_path):
         super(NeRFSynthesicDataset, self).__init__()
         """
         Args:
@@ -13,35 +17,41 @@ class NeRFSynthesicDataset(Dataset):
             split (str): train, val, test
         """
         # dataset configs
-        assert split in ['train', 'val', 'test']
-        self.split = split
         self.data_path = data_path
         
         # load transforms
-        with open(os.path.join(data_path, 'transforms_{}.json'.format(split)), 'r') as file:
-            transfroms = json.load(file)
-        self.camera_angle_x = transfroms['camera_angle_x']
-        self.frames = transfroms['frames']
+        frames = []
+        split = ['train', 'val', 'test']
+        for s in split:
+            with open(os.path.join(data_path, 'transforms_{}.json'.format(s)), 'r') as file:
+                transfroms = json.load(file)
+            camera_angle_x = transfroms['camera_angle_x']
+            frames += transfroms['frames']
+        random.shuffle(frames)
+        self.frame_set = frames
+        
+        # load an image to get H/W
+        file_path = os.path.join(self.data_path, frames[0]['file_path'][2:]) + '.png'
+        image = imageio.v2.imread(file_path)
+
+        # camera intrinsics
+        self.H = image[0].shape[0]
+        self.W = image[0].shape[1]
+        self.focal = 0.5 * self.W / math.tan(0.5 * camera_angle_x)
         
     def __len__(self):
-        return len(self.frames)
+        return len(self.frame_set)
     
     def __getitem__(self, index):
-        file_path = os.path.join(self.data_path, self.frames[index]['file_path'][2:]) + '.png'
-        try:
-            image = imageio.v2.imread(file_path)
-        except:
-            raise IOError('[ERROR] Image loading failed: {:s}'.format(file_path))
+        file_path = os.path.join(self.data_path, self.frame_set[index]['file_path'][2:]) + '.png'
+        image = imageio.v2.imread(file_path)
         
-        #! TODO : image need transformation?
-        #! TODO : on cuda?
-        lib = {
-            'camera_angle_x': self.camera_angle_x,
-            'rotation': self.frames[index]['rotation'],
-            'transform_matrix': self.frames[index]['transform_matrix'],
-            'image': image
-        }
-        return lib
+        # generate rays
+        x, y = torch.meshgrid(torch.arange(self.H), torch.arange(self.W))
+        pts = torch.tensor(self.frame_set[index]['transform_matrix'][:3, -1]).float().expand(self.H * self.W)
+        #!TODO
+        
+        #! warning: return a tensor but not on cuda
     
 #! TODO
 class ColmapDataset(Dataset):
@@ -59,11 +69,11 @@ class ColmapDataset(Dataset):
     def __getitem__(self, index):
         return None
 
-def make_dataset(cfg, data_path, split):
+def make_dataset(cfg, data_path):
     if cfg['type'] == 'nerf_synthesic':
-        return NeRFSynthesicDataset(data_path, split)
+        return NeRFSynthesicDataset(data_path)
     elif cfg['type'] == 'colmap':
-        return ColmapDataset(data_path, split)
+        return ColmapDataset(data_path)
     else :
         raise NotImplementedError("[ERROR] No such data type: {}.".format(data_path))
     

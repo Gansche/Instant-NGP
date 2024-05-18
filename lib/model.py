@@ -3,6 +3,8 @@ import math
 import torch
 import torch.nn as nn
 
+from lib.render import Renderer
+
 class InstantNGP(nn.Module):
     def __init__(self, cfg_enc, cfg_dec) -> None:
         super(InstantNGP, self).__init__()
@@ -17,11 +19,13 @@ class InstantNGP(nn.Module):
         else:
             raise NotImplementedError("[ERROR] No such arch: {}.".format(cfg_dec['arch']))
         
+        self.renderer = Renderer()
+        
     def forward(self):
         """
         Args:
-            input:point?
-            output:rgb+sdf?
+            input: rays (bs, o+d)
+            output: rgb and sigma (bs, 3+1)
         """
         pass
 
@@ -48,7 +52,8 @@ class HashGridEncoder(nn.Module):
         Args:
             x (tensor): input position
         """
-        pass
+        assert x.shape[-1] == 3
+        
     
 class FrequencyEncoder(nn.Module):
     def __init__(self) -> None:
