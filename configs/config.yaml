@@ -1,5 +1,6 @@
 data:
   type: nerf_synthesic
+  batch_size: 1
 
 encoder:
   arch: hash_grid
@@ -32,3 +33,5 @@ decoder:
 trainer:
 
 loss:
+
+ckpt_path: log

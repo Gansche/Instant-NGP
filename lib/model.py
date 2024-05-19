@@ -3,13 +3,16 @@ import math
 import torch
 import torch.nn as nn
 
-from lib.render import Renderer
+###############################################################################
+""" Instant NGP """
 
 class InstantNGP(nn.Module):
     def __init__(self, cfg_enc, cfg_dec) -> None:
         super(InstantNGP, self).__init__()
         
-        # self.encoder = HashGridEncoder()
+        self.sampler = Sampler()
+        
+        self.encoder = HashGridEncoder()
         
         if cfg_dec['arch'] == 'nerf':
             self.decoder = NeuralRadianceField(cfg_dec['nerf'])
@@ -24,10 +27,23 @@ class InstantNGP(nn.Module):
     def forward(self):
         """
         Args:
-            input: rays (bs, o+d)
-            output: rgb and sigma (bs, 3+1)
+            input: rays (:, o+d=6)
+            output: rgb and sigma (:, 3+1)
         """
         pass
+
+###############################################################################
+""" Sampler """
+
+class Sampler(nn.Module):
+    def __init__(self) -> None:
+        super(Sampler, self).__init__()
+        
+    def forward(self):
+        pass
+
+###############################################################################
+""" Encoder """
 
 class HashGridEncoder(nn.Module):
     def __init__(self, cfg_enc) -> None:
@@ -54,7 +70,6 @@ class HashGridEncoder(nn.Module):
         """
         assert x.shape[-1] == 3
         
-    
 class FrequencyEncoder(nn.Module):
     def __init__(self) -> None:
         super(FrequencyEncoder, self).__init__()
@@ -62,8 +77,9 @@ class FrequencyEncoder(nn.Module):
     def forward(self, x):
         pass
     
-    
-#! TODO
+###############################################################################
+""" NerRF model """
+
 class NeuralRadianceField(nn.Module):
     def __init__(self, pos_dim, view_dim, cfg_dec) -> None:
         super(NeuralRadianceField, self).__init__()   
@@ -144,3 +160,13 @@ class SimplifiedNeuralRadianceField(nn.Module):
         
         color = self.color_model(torch.cat(view_enc, latent_vc, dim=-1))
         return sigma, color
+
+###############################################################################
+""" Renderer """
+
+class Renderer(nn.Module):
+    def __init__(self) -> None:
+        super(Renderer, self).__init__()
+        
+    def forward(self):
+        pass

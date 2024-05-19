@@ -3,10 +3,11 @@ import json
 import math
 import imageio 
 import random
-import pdb
 
 import torch
 from torch.utils.data import Dataset
+
+import pdb
 
 class NeRFSynthesicDataset(Dataset):
     def __init__(self, data_path):
@@ -29,29 +30,43 @@ class NeRFSynthesicDataset(Dataset):
             frames += transfroms['frames']
         random.shuffle(frames)
         self.frame_set = frames
-        
         # load an image to get H/W
         file_path = os.path.join(self.data_path, frames[0]['file_path'][2:]) + '.png'
         image = imageio.v2.imread(file_path)
 
         # camera intrinsics
-        self.H = image[0].shape[0]
-        self.W = image[0].shape[1]
+        self.H = image.shape[0]
+        self.W = image.shape[1]
         self.focal = 0.5 * self.W / math.tan(0.5 * camera_angle_x)
         
     def __len__(self):
         return len(self.frame_set)
     
     def __getitem__(self, index):
+        # load ground truth image
         file_path = os.path.join(self.data_path, self.frame_set[index]['file_path'][2:]) + '.png'
         image = imageio.v2.imread(file_path)
+        image = torch.tensor(image, dtype=torch.float32)
         
         # generate rays
-        x, y = torch.meshgrid(torch.arange(self.H), torch.arange(self.W))
-        pts = torch.tensor(self.frame_set[index]['transform_matrix'][:3, -1]).float().expand(self.H * self.W)
-        #!TODO
+        c2w = torch.tensor(self.frame_set[index]['transform_matrix'], dtype=torch.float32)
+        x, y = torch.meshgrid(
+            torch.arange(self.W, dtype=torch.float32), 
+            torch.arange(self.H, dtype=torch.float32), 
+            indexing='xy'
+        )
+        dirs = torch.stack([(x - self.W * 0.5) / self.focal, -(y - self.H * 0.5) / self.focal, -torch.ones_like(x)], -1)
+        dirs_world = dirs @ c2w[:3, :3].T
+        dirs_world = dirs_world / torch.norm(dirs_world, dim=-1, keepdim=True)
+        pts =  c2w[:3, -1].expand(self.H, self.W, 3)
+        rays = torch.cat([dirs_world, pts], dim=-1)
         
-        #! warning: return a tensor but not on cuda
+        # both tensors but not on cuda
+        item = {
+            'rays' : rays,  # (W, H, d+o=6)
+            'gt_image' : image
+        }
+        return item
     
 #! TODO
 class ColmapDataset(Dataset):
