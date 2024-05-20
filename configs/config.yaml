@@ -2,36 +2,42 @@ data:
   type: nerf_synthesic
   batch_size: 1
 
-encoder:
-  arch: hash_grid
+sampler:
+  near: 2.0
+  far: 6.0
+  num_sample: 64
 
-  hash_grid:
-    L: 16
-    log2T: 19
-    F: 2
-    N_min: 16
-    N_max: 512
+hash_grid_enc:
+  L: 16
+  log2T: 19
+  F: 2
+  N_min: 16
+  N_max: 512
+
+freq_enc:
 
 decoder:
-  arch: simple_nerf
+  pos_dim: 
+  view_dim: 
 
-  nerf:
-    sigma_net:
+  sigma_net:
+    num_layers: 2
+    hidden_dim: 64
+    out_dim: 16
 
-    color_net:
+  color_net:
+    num_layers: 3
+    hidden_dim: 64
+    out_dim: 3
 
-  simple_nerf:
-    sigma_net:
-      num_layers: 2
-      hidden_dim: 64
-      out_dim: 16
-    color_net:
-      num_layers: 3
-      hidden_dim: 64
-      out_dim: 3
+renderer:
 
 trainer:
+  optim:
+  sched:
 
 loss:
 
-ckpt_path: log
+epoches: 5000
+
+ckpt_path: log/

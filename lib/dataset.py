@@ -57,16 +57,13 @@ class NeRFSynthesicDataset(Dataset):
         )
         dirs = torch.stack([(x - self.W * 0.5) / self.focal, -(y - self.H * 0.5) / self.focal, -torch.ones_like(x)], -1)
         dirs_world = dirs @ c2w[:3, :3].T
-        dirs_world = dirs_world / torch.norm(dirs_world, dim=-1, keepdim=True)
+        # dirs_world = dirs_world / torch.norm(dirs_world, dim=-1, keepdim=True)
+        #! 这里暂时不normalize，可能跟near/far对齐有关系
         pts =  c2w[:3, -1].expand(self.H, self.W, 3)
         rays = torch.cat([dirs_world, pts], dim=-1)
         
         # both tensors but not on cuda
-        item = {
-            'rays' : rays,  # (W, H, d+o=6)
-            'gt_image' : image
-        }
-        return item
+        return {'rays' : rays, 'gt_image' : image}
     
 #! TODO
 class ColmapDataset(Dataset):
