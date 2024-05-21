@@ -15,11 +15,11 @@ class InstantNGP(nn.Module):
         self.cfg = cfg
         
         self.sampler = Sampler(cfg['sampler'])
-        # self.pos_enc = HashGridEncoder(cfg['hash_grid_enc'])
-        # self.pos_enc = FrequencyEncoder(cfg['freq_enc'])
-        self.pos_enc = SHEncoder()
+        self.pos_enc = HashGridEncoder(cfg['hash_grid_enc'])
+        # self.dir_enc = FrequencyEncoder(cfg['freq_enc'])
+        self.dir_enc = SHEncoder(cfg['sh_enc'])
         # self.decoder = SimplifiedNeuralRadianceField(cfg['decoder'])
-        # self.renderer = Renderer(cfg['renderer'])
+        self.renderer = Renderer(cfg['renderer'])
         
     def forward(self, rays):
         """
@@ -28,7 +28,7 @@ class InstantNGP(nn.Module):
             output: rgb and sigma (:, 3+1)
         """
         pts, dirs = self.sampler(rays)
-        enc_dirs = self.pos_enc(dirs)
+        enc_dirs = self.dir_enc(dirs)
         pdb.set_trace()
 
 ###############################################################################
@@ -87,26 +87,32 @@ class FrequencyEncoder(nn.Module):
     def __init__(self, cfg) -> None:
         super(FrequencyEncoder, self).__init__()
         self.L = cfg['L']
+        self.funcs = [torch.sin, torch.cos]
         
     def forward(self, x):
         """
         Method:
             enc(p) = (sin(2^0p), cos(2^0p) ... sin(2^(2L-1)p), cos(2^(2L-1)p))
         """
-        pass
+        enc_x = []
+        for i in range(self.L * 2):
+            for func in self.funcs:
+                enc_x.append(func(x * (2 ** i)))
+        enc_x = torch.cat(enc_x, dim=-1)
+        return enc_x
     
 class SHEncoder(nn.Module):
-    def __init__(self, input_dim=3, degree=4):
+    def __init__(self, cfg):
     
         super().__init__()
 
-        self.input_dim = input_dim
-        self.degree = degree
+        self.input_dim = cfg['input_dim']
+        self.degree = cfg['degree']
 
         assert self.input_dim == 3
         assert self.degree >= 1 and self.degree <= 5
 
-        self.out_dim = degree ** 2
+        self.out_dim = self.degree ** 2
 
         self.C0 = 0.28209479177387814
         self.C1 = 0.4886025119029199
@@ -238,5 +244,6 @@ class Renderer(nn.Module):
     def __init__(self, cfg) -> None:
         super(Renderer, self).__init__()
         
-    def forward(self):
-        pass
+    def forward(self, x):
+        rgb = None
+        return rgb

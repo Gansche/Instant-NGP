@@ -15,6 +15,11 @@ hash_grid_enc:
   N_max: 512
 
 freq_enc:
+  L: 3
+
+sh_enc:
+  input_dim: 3
+  degree: 4
 
 decoder:
   pos_dim: 

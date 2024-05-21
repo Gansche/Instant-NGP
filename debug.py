@@ -12,7 +12,7 @@ dataset = make_dataset(config['data'], 'data/hotdog')
 data = dataset[0]
 
 # rays = data['rays'].view(-1,6)[:1024, ...]
-rays = data['rays'].cuda()
+rays = data['rays'].view(-1,6)[:1024, ...].cuda()
 model = InstantNGP(config).cuda()
 
 output = model(rays)
