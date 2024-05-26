@@ -127,13 +127,17 @@ class HashGridEncoder(nn.Module):
         return result % self.T
 
     def get_interpolation(self, xyz, min_v, max_v, emb_indices):
+        """
+            xyz,                    # [1024, 64, 3]
+            min_vertex, max_vertex, # [1024, 64, 8, 3]
+            embedded_indices        # [1024, 64, 8, 2]
+        """
         d = (xyz - min_v) / (max_v - min_v)
-        # TODO
-        
-        # c00 = emb_indices[:, 0] * (1 - d[:, 0][:, None]) + emb_indices[:,4] * d[:, 0][:, None]
-        # c01 = emb_indices[:, 1] * (1 - d[:, 0][:, None]) + emb_indices[:,5] * d[:, 0][:, None]
-        # c10 = emb_indices[:, 2] * (1 - d[:, 0][:, None]) + emb_indices[:,6] * d[:, 0][:, None]
-        # c11 = emb_indices[:, 3] * (1 - d[:, 0][:, None]) + emb_indices[:,7] * d[:, 0][:, None]
+        pdb.set_trace()
+        c00 = emb_indices[..., 0] * (1 - d[:, 0][:, None]) + emb_indices[:,4] * d[:, 0][:, None]
+        c01 = emb_indices[..., 1] * (1 - d[:, 0][:, None]) + emb_indices[:,5] * d[:, 0][:, None]
+        c10 = emb_indices[:, 2] * (1 - d[:, 0][:, None]) + emb_indices[:,6] * d[:, 0][:, None]
+        c11 = emb_indices[:, 3] * (1 - d[:, 0][:, None]) + emb_indices[:,7] * d[:, 0][:, None]
         
         # c0 = c00 * (1 - d[:, 1][:, None]) + c10 * d[:, 1][:, None]
         # c1 = c01 * (1 - d[:, 1][:, None]) + c11 * d[:, 1][:, None]
