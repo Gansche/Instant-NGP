@@ -23,7 +23,7 @@ sh_enc:
 
 decoder:
   pos_dim: 
-  view_dim: 
+  view_dim: 16
 
   sigma_net:
     num_layers: 2

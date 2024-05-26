@@ -2,6 +2,7 @@ import math
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 import pdb
 
@@ -9,13 +10,13 @@ import pdb
 """ Instant NGP """
 
 class InstantNGP(nn.Module):
-    def __init__(self, cfg) -> None:
+    def __init__(self, cfg, bb) -> None:
         super(InstantNGP, self).__init__()
         
         self.cfg = cfg
         
         self.sampler = Sampler(cfg['sampler'])
-        self.pos_enc = HashGridEncoder(cfg['hash_grid_enc'])
+        self.pos_enc = HashGridEncoder(cfg['hash_grid_enc'], bb)
         # self.dir_enc = FrequencyEncoder(cfg['freq_enc'])
         self.dir_enc = SHEncoder(cfg['sh_enc'])
         # self.decoder = SimplifiedNeuralRadianceField(cfg['decoder'])
@@ -27,9 +28,19 @@ class InstantNGP(nn.Module):
             input: rays (:, o+d=6)
             output: rgb and sigma (:, 3+1)
         """
-        pts, dirs = self.sampler(rays)
+        # sampling
+        pts, dirs, dists = self.sampler(rays)
+        
+        # encoding
+        enc_pts = self.pos_enc(pts)
         enc_dirs = self.dir_enc(dirs)
-        pdb.set_trace()
+        
+        # nerfing
+        
+        # rendering
+        
+        return None
+        
 
 ###############################################################################
 """ Sampler """
@@ -43,23 +54,36 @@ class Sampler(nn.Module):
         
     def forward(self, rays):
         #! 这里的rays方向是没有normalize的，先跟HashNeRF对齐写出来再说
-        #! 等距采样不perturb
         dirs = rays[..., :3].unsqueeze(-2)
         pts = rays[..., 3:].unsqueeze(-2)
         
         t = torch.linspace(self.near, self.far, self.num_sample).cuda()
-        t = t.view(*([1] * (len(pts.shape) - 1)), self.num_sample, 1)
-        sampled_pts = (pts + t * dirs).squeeze(0)
+        
+        # perturb
+        repeat_times = rays.shape[:-1] + tuple(1 for _ in range(len(t.shape)))
+        t_pt = t.repeat(repeat_times)
+        mid = (t_pt[...,1:] +t_pt[...,:-1]) * 0.5
+        upper = torch.cat([mid, t_pt[...,-1:]], -1)
+        lower = torch.cat([t_pt[...,:1], mid], -1)
+        t_rand = torch.rand(t_pt.shape).cuda()
+        t_pt = lower + (upper - lower) * t_rand
+        dists = torch.cat(
+            [
+                t_pt[...,1:] - t_pt[...,:-1], 
+                torch.tensor([1e10]).expand(t_pt[...,:1].shape).cuda()
+            ], dim=-1
+        )
+
+        sampled_pts = (pts + dirs * t.unsqueeze(-1)).squeeze(0)
         sampled_dirs = dirs.repeat(*([1] * (dirs.ndimension() - 2)), self.num_sample, 1)
         
-        return sampled_pts, sampled_dirs
-        
+        return sampled_pts, sampled_dirs, dists
 
 ###############################################################################
 """ Encoder """
 
 class HashGridEncoder(nn.Module):
-    def __init__(self, cfg) -> None:
+    def __init__(self, cfg, bb) -> None:
         super(HashGridEncoder, self).__init__()
         self.L = cfg['L']
         self.T = int(math.pow(2, cfg['log2T']))
@@ -67,21 +91,77 @@ class HashGridEncoder(nn.Module):
         self.N_min = cfg['N_min']
         self.N_max = cfg['N_max']
         self.b = math.exp(math.log(self.N_max) - math.log(self.N_min) / (self.L - 1))
+        self.bb_min, self.bb_max = bb
 
         hash_grids = []
         resolutions = []
         for i in range(self.L):
-            hash_grids.append(nn.Embedding(self.T, self.F))
+            embedding = nn.Embedding(self.T, self.F)
+            nn.init.uniform_(embedding.weight, a=-0.0001, b=0.0001)
+            hash_grids.append(embedding)
             resolutions.append(math.floor(self.N_min * math.pow(self.b, i)))
         self.hash_grids = nn.ModuleList(hash_grids)
         self.resolutions = resolutions
         
-    def forward(self, x):
+        self.vertices = torch.tensor(
+            [
+                [0, 0, 0], [0, 0, 1], [0, 1, 0], [0, 1, 1], 
+                [1, 0, 0], [1, 0, 1], [1, 1, 0], [1, 1, 1]
+            ]
+        ).cuda()
+        self.pi = [1, 2654435761, 805459861]
+    
+    def get_indices_vertices(self, i, xyz):
+        cell = (self.bb_max - self.bb_min) / self.resolutions[i]
+        min_index = torch.floor((xyz - self.bb_min) / cell).int()
+        min_vertex = min_index * cell + self.bb_min
+        max_vertex = min_vertex + torch.tensor([1, 1, 1]).cuda() * cell
+        indices = min_index.unsqueeze(-2) + self.vertices
+        return indices, min_vertex, max_vertex
+    
+    def get_hash_indices(self, xyz):
+        assert xyz.shape[-1] == 3
+        result = torch.zeros_like(xyz)[..., 0]
+        for i in range(xyz.shape[-1]):
+            result ^= xyz[..., i] * self.pi[i]
+        return result % self.T
+
+    def get_interpolation(self, xyz, min_v, max_v, emb_indices):
+        d = (xyz - min_v) / (max_v - min_v)
+        # TODO
+        
+        # c00 = emb_indices[:, 0] * (1 - d[:, 0][:, None]) + emb_indices[:,4] * d[:, 0][:, None]
+        # c01 = emb_indices[:, 1] * (1 - d[:, 0][:, None]) + emb_indices[:,5] * d[:, 0][:, None]
+        # c10 = emb_indices[:, 2] * (1 - d[:, 0][:, None]) + emb_indices[:,6] * d[:, 0][:, None]
+        # c11 = emb_indices[:, 3] * (1 - d[:, 0][:, None]) + emb_indices[:,7] * d[:, 0][:, None]
+        
+        # c0 = c00 * (1 - d[:, 1][:, None]) + c10 * d[:, 1][:, None]
+        # c1 = c01 * (1 - d[:, 1][:, None]) + c11 * d[:, 1][:, None]
+        
+        # c = c0 * (1 - d[:, 2][:, None]) + c1 * d[:, 2][:, None]
+        
+        return None
+    
+    def forward(self, xyz):
         """
         Args:
             x (tensor): input position
         """
-        assert x.shape[-1] == 3
+        assert xyz.shape[-1] == 3
+        embedded = []
+        for i in range(self.L):
+            indices, min_vertex, max_vertex = self.get_indices_vertices(i, xyz)
+            hash_indices = self.get_hash_indices(indices)
+            embedded_indices = self.hash_grids[i](hash_indices)
+            embedded_i = self.get_interpolation(
+                xyz,                    # [1024, 64, 3]
+                min_vertex, max_vertex, # [1024, 64, 8, 3]
+                embedded_indices        # [1024, 64, 8, 2]
+            )
+            pdb.set_trace()
+            embedded.append(embedded_i)
+        enc_pts = torch.cat(embedded, dim=-1)
+        return enc_pts
         
 class FrequencyEncoder(nn.Module):
     def __init__(self, cfg) -> None:
@@ -214,7 +294,6 @@ class SimplifiedNeuralRadianceField(nn.Module):
                 color_model.add_module(nn.ReLU())
             elif i == self.cfg_color['num_layers'] - 1:
                 color_model.add_module(nn.Linear(self.cfg_color['hidden_dim'], self.cfg_color['out_dim'], bias=False))
-                #! HashNeRF has no sigmoid layer but NeRF does, I wonder what will happen if add a sigmoid layer...
                 color_model.add_module(nn.Sigmoid())
             else:
                 color_model.add_module(nn.Linear(self.cfg_color['hidden_dim'], self.cfg_color['hidden_dim'], bias=False))
@@ -231,7 +310,7 @@ class SimplifiedNeuralRadianceField(nn.Module):
             color (tensor): color (..., 3)
         """
         output = self.sigma_model(pos_enc)
-        sigma = output[..., 0].unsqueeze(-1)
+        sigma = F.relu(output[..., 0].unsqueeze(-1))
         latent_vc = output[..., 1:]
         
         color = self.color_model(torch.cat(view_enc, latent_vc, dim=-1))
@@ -244,6 +323,9 @@ class Renderer(nn.Module):
     def __init__(self, cfg) -> None:
         super(Renderer, self).__init__()
         
-    def forward(self, x):
+    def forward(self, sigma, color, dists):
+        alpha = 1 - torch.exp(sigma * dists)
+        weight = None
+        
         rgb = None
         return rgb

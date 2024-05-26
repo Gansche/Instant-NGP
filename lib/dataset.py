@@ -56,6 +56,7 @@ class NeRFSynthesicDataset(Dataset):
             indexing='xy'
         )
         dirs = torch.stack([(x - self.W * 0.5) / self.focal, -(y - self.H * 0.5) / self.focal, -torch.ones_like(x)], -1)
+        # pdb.set_trace()
         dirs_world = dirs @ c2w[:3, :3].T
         # dirs_world = dirs_world / torch.norm(dirs_world, dim=-1, keepdim=True)
         #! 这里暂时不normalize，可能跟near/far对齐有关系
