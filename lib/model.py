@@ -4,8 +4,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-import pdb
-
 ###############################################################################
 """ Instant NGP """
 
@@ -19,7 +17,7 @@ class InstantNGP(nn.Module):
         self.pos_enc = HashGridEncoder(cfg['hash_grid_enc'], bb)
         # self.dir_enc = FrequencyEncoder(cfg['freq_enc'])
         self.dir_enc = SHEncoder(cfg['sh_enc'])
-        # self.decoder = SimplifiedNeuralRadianceField(cfg['decoder'])
+        self.decoder = SimplifiedNeuralRadianceField(cfg['decoder'])
         self.renderer = Renderer(cfg['renderer'])
         
     def forward(self, rays):
@@ -29,17 +27,19 @@ class InstantNGP(nn.Module):
             output: rgb and sigma (:, 3+1)
         """
         # sampling
-        pts, dirs, dists = self.sampler(rays)
+        pose, dirs, dists = self.sampler(rays)
         
         # encoding
-        enc_pts = self.pos_enc(pts)
-        enc_dirs = self.dir_enc(dirs)
+        pose_enc = self.pos_enc(pose)
+        dirs_enc = self.dir_enc(dirs)
         
         # nerfing
+        sigma, color = self.decoder(pose_enc, dirs_enc)
         
         # rendering
-        
-        return None
+        rgb = self.renderer(sigma ,color, dists)
+
+        return rgb
         
 
 ###############################################################################
@@ -53,7 +53,7 @@ class Sampler(nn.Module):
         self.num_sample = cfg['num_sample']
         
     def forward(self, rays):
-        #! 这里的rays方向是没有normalize的，先跟HashNeRF对齐写出来再说
+        #! normalize的
         dirs = rays[..., :3].unsqueeze(-2)
         pts = rays[..., 3:].unsqueeze(-2)
         
@@ -90,8 +90,9 @@ class HashGridEncoder(nn.Module):
         self.F = int(cfg['F'])
         self.N_min = cfg['N_min']
         self.N_max = cfg['N_max']
-        self.b = math.exp(math.log(self.N_max) - math.log(self.N_min) / (self.L - 1))
-        self.bb_min, self.bb_max = bb
+        self.b = math.exp((math.log(self.N_max) - math.log(self.N_min)) / (self.L - 1))
+        self.bb_min = bb[..., :3]
+        self.bb_max = bb[..., 3:]
 
         hash_grids = []
         resolutions = []
@@ -127,24 +128,15 @@ class HashGridEncoder(nn.Module):
         return result % self.T
 
     def get_interpolation(self, xyz, min_v, max_v, emb_indices):
-        """
-            xyz,                    # [1024, 64, 3]
-            min_vertex, max_vertex, # [1024, 64, 8, 3]
-            embedded_indices        # [1024, 64, 8, 2]
-        """
         d = (xyz - min_v) / (max_v - min_v)
-        pdb.set_trace()
-        c00 = emb_indices[..., 0] * (1 - d[:, 0][:, None]) + emb_indices[:,4] * d[:, 0][:, None]
-        c01 = emb_indices[..., 1] * (1 - d[:, 0][:, None]) + emb_indices[:,5] * d[:, 0][:, None]
-        c10 = emb_indices[:, 2] * (1 - d[:, 0][:, None]) + emb_indices[:,6] * d[:, 0][:, None]
-        c11 = emb_indices[:, 3] * (1 - d[:, 0][:, None]) + emb_indices[:,7] * d[:, 0][:, None]
-        
-        # c0 = c00 * (1 - d[:, 1][:, None]) + c10 * d[:, 1][:, None]
-        # c1 = c01 * (1 - d[:, 1][:, None]) + c11 * d[:, 1][:, None]
-        
-        # c = c0 * (1 - d[:, 2][:, None]) + c1 * d[:, 2][:, None]
-        
-        return None
+        c00 = emb_indices[..., 0, :] * (1 - d[..., 0][..., None]) + emb_indices[..., 4, :] * d[..., 0][..., None]
+        c01 = emb_indices[..., 1, :] * (1 - d[..., 0][..., None]) + emb_indices[..., 5, :] * d[..., 0][..., None]
+        c10 = emb_indices[..., 2, :] * (1 - d[..., 0][..., None]) + emb_indices[..., 6, :] * d[..., 0][..., None]
+        c11 = emb_indices[..., 3, :] * (1 - d[..., 0][..., None]) + emb_indices[..., 7, :] * d[..., 0][..., None]
+        c0 = c00 * (1 - d[..., 1][..., None]) + c10 * d[..., 1][..., None]
+        c1 = c01 * (1 - d[..., 1][..., None]) + c11 * d[..., 1][..., None]
+        c = c0 * (1 - d[..., 2][..., None]) + c1 * d[..., 2][..., None]
+        return c
     
     def forward(self, xyz):
         """
@@ -162,10 +154,8 @@ class HashGridEncoder(nn.Module):
                 min_vertex, max_vertex, # [1024, 64, 8, 3]
                 embedded_indices        # [1024, 64, 8, 2]
             )
-            pdb.set_trace()
             embedded.append(embedded_i)
-        enc_pts = torch.cat(embedded, dim=-1)
-        return enc_pts
+        return torch.cat(embedded, dim=-1)
         
 class FrequencyEncoder(nn.Module):
     def __init__(self, cfg) -> None:
@@ -182,8 +172,7 @@ class FrequencyEncoder(nn.Module):
         for i in range(self.L * 2):
             for func in self.funcs:
                 enc_x.append(func(x * (2 ** i)))
-        enc_x = torch.cat(enc_x, dim=-1)
-        return enc_x
+        return torch.cat(enc_x, dim=-1)
     
 class SHEncoder(nn.Module):
     def __init__(self, cfg):
@@ -281,27 +270,27 @@ class SimplifiedNeuralRadianceField(nn.Module):
         sigma_model = nn.Sequential()
         for i in range(self.cfg_sigma['num_layers']):
             if i == 0:
-                sigma_model.add_module(nn.Linear(self.pos_dim, self.cfg_sigma['hidden_dim'], bias=False))
-                sigma_model.add_module(nn.ReLU())
+                sigma_model.append(nn.Linear(self.pos_dim, self.cfg_sigma['hidden_dim'], bias=False))
+                sigma_model.append(nn.ReLU())
             elif i == self.cfg_sigma['num_layers'] - 1:
-                sigma_model.add_module(nn.Linear(self.cfg_sigma['hidden_dim'], self.cfg_sigma['out_dim'], bias=False))
+                sigma_model.append(nn.Linear(self.cfg_sigma['hidden_dim'], self.cfg_sigma['out_dim'], bias=False))
             else:
-                sigma_model.add_module(nn.Linear(self.cfg_sigma['hidden_dim'], self.cfg_sigma['hidden_dim'], bias=False))
-                sigma_model.add_module(nn.ReLU())
+                sigma_model.append(nn.Linear(self.cfg_sigma['hidden_dim'], self.cfg_sigma['hidden_dim'], bias=False))
+                sigma_model.append(nn.ReLU())
         self.sigma_model = sigma_model
         
         self.cfg_color = cfg['color_net']
         color_model = nn.Sequential()
         for i in range(self.cfg_color['num_layers']):
             if i == 0:
-                color_model.add_module(nn.Linear(self.view_dim + self.cfg_sigma['out_dim'] - 1, self.cfg_color['hidden_dim'], bias=False))
-                color_model.add_module(nn.ReLU())
+                color_model.append(nn.Linear(self.view_dim + self.cfg_sigma['out_dim'] - 1, self.cfg_color['hidden_dim'], bias=False))
+                color_model.append(nn.ReLU())
             elif i == self.cfg_color['num_layers'] - 1:
-                color_model.add_module(nn.Linear(self.cfg_color['hidden_dim'], self.cfg_color['out_dim'], bias=False))
-                color_model.add_module(nn.Sigmoid())
+                color_model.append(nn.Linear(self.cfg_color['hidden_dim'], self.cfg_color['out_dim'], bias=False))
+                color_model.append(nn.Sigmoid())
             else:
-                color_model.add_module(nn.Linear(self.cfg_color['hidden_dim'], self.cfg_color['hidden_dim'], bias=False))
-                color_model.add_module(nn.ReLU())
+                color_model.append(nn.Linear(self.cfg_color['hidden_dim'], self.cfg_color['hidden_dim'], bias=False))
+                color_model.append(nn.ReLU())
         self.color_model = color_model
         
     def forward(self, pos_enc, view_enc):
@@ -317,7 +306,7 @@ class SimplifiedNeuralRadianceField(nn.Module):
         sigma = F.relu(output[..., 0].unsqueeze(-1))
         latent_vc = output[..., 1:]
         
-        color = self.color_model(torch.cat(view_enc, latent_vc, dim=-1))
+        color = self.color_model(torch.cat((view_enc, latent_vc), dim=-1))
         return sigma, color
 
 ###############################################################################
@@ -328,8 +317,10 @@ class Renderer(nn.Module):
         super(Renderer, self).__init__()
         
     def forward(self, sigma, color, dists):
-        alpha = 1 - torch.exp(sigma * dists)
-        weight = None
+        alpha = 1 - torch.exp((-1) * sigma * dists[..., None])
+        temp = torch.cat((torch.ones_like(alpha[..., 0, :][..., None], dtype=torch.float32), 1.0 - alpha + 1e-10), dim=-2)
+        T = torch.cumprod(temp[..., :-1, :], dim=-1)
+        weight = alpha * T
+        rgb = torch.sum(weight * color, dim=-2)
         
-        rgb = None
         return rgb

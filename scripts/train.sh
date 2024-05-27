@@ -1,0 +1,1 @@
+CUDA_VISIBLE_DEVICES=3 python instant_ngp.py

@@ -14,7 +14,6 @@ except ImportError:
     TENSORBOARD_FOUND = False
     
 from lib.utils import *
-from lib.trainer import make_trainer
 from lib.dataset import make_dataset, cycle
 from lib.model import InstantNGP
 from lib.loss import PictureLoss
@@ -33,30 +32,35 @@ def training(config, args):
     ###########################################################################
     """ dataset """
     dataset =  make_dataset(config['data'], args.data_path)
+    bb = dataset.create_bounding_box()
     
     # split dataset
-    pivot = int(len(dataset) * 0.9)
+    pivot = int(len(dataset) * 0.99)
     train_data, valid_data = random_split(dataset, [pivot, len(dataset) - pivot])
     
-    # TODO : collect function?
+    # train dataset
     train_loader = DataLoader(
         train_data, batch_size=config['data']['batch_size'],
         shuffle=True, drop_last=False
     )
     train_iterator = cycle(train_loader)
     
+    # validation dataset
     valid_loader = DataLoader(
         valid_data, batch_size=config['data']['batch_size'],
         shuffle=True, drop_last=False
     )
     valid_iterator = cycle(valid_loader)
     
+    while(1):
+        input = next(valid_iterator)
+        pdb.set_trace()
+    
     ###########################################################################
     """ preparation """
-    model = InstantNGP(config)
+    model = InstantNGP(config, bb)
     loss = PictureLoss(config['loss'])
     
-    trainer = make_trainer(config['trainer'], model, loss)
     
     ###########################################################################
     """ train & validation """

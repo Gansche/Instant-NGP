@@ -3,19 +3,26 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class InstantNGPTrainer():
-    def __init__(self, optim, sched, model) -> None:
+    def __init__(self, optim, sched, model, loss) -> None:
         self.optim = optim
         self.sched = sched
         self.model = model 
+        self.loss = loss
+        
+    def load(self):
+        pass
     
-def make_optim(cfg):
-    pass
+    def save(self):
+        pass
+    
+    def cuda(self):
+        pass
+        
+    def train(self):
+        self.model.train()
 
-def make_sched(cfg):
-    pass
-
-def make_trainer(cfg, model, loss):
-    optim = make_optim(cfg)
-    sched = make_sched(cfg)
-    trainer = InstantNGPTrainer(optim, sched, model)
-    return trainer
+    def eval(self):
+        self.model.eval()
+        
+    def forward(self):
+        pass

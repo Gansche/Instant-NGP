@@ -1,6 +1,8 @@
 data:
   type: nerf_synthesic
   batch_size: 1
+  near: 2.0
+  far: 6.0
 
 sampler:
   near: 2.0
@@ -22,7 +24,7 @@ sh_enc:
   degree: 4
 
 decoder:
-  pos_dim: 
+  pos_dim: 32
   view_dim: 16
 
   sigma_net:
