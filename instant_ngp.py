@@ -7,16 +7,15 @@ from tqdm import tqdm
 
 import torch
 from torch.utils.data import DataLoader, random_split
-try:
-    from torch.utils.tensorboard import SummaryWriter
-    TENSORBOARD_FOUND = True
-except ImportError:
-    TENSORBOARD_FOUND = False
-    
+
+from torch.utils.tensorboard import SummaryWriter
+
 from lib.utils import *
 from lib.dataset import make_dataset, cycle
+from lib.trainer import InstantNGPTrainer
 from lib.model import InstantNGP
-from lib.loss import PictureLoss
+from lib.loss import Loss
+from lib.radam import RAdam
     
 import pdb
     
@@ -27,15 +26,15 @@ def training(config, args):
     torch.manual_seed(0)
     torch.cuda.manual_seed(0)
     
-    writer = SummaryWriter(config['ckpt_path'])
+    writer = SummaryWriter(config['tensorboard_path'])
     
     ###########################################################################
     """ dataset """
     dataset =  make_dataset(config['data'], args.data_path)
-    bb = dataset.create_bounding_box()
+    bb = dataset.create_bounding_box().cuda()
     
     # split dataset
-    pivot = int(len(dataset) * 0.99)
+    pivot = int(len(dataset) * 0.8)
     train_data, valid_data = random_split(dataset, [pivot, len(dataset) - pivot])
     
     # train dataset
@@ -48,24 +47,50 @@ def training(config, args):
     # validation dataset
     valid_loader = DataLoader(
         valid_data, batch_size=config['data']['batch_size'],
-        shuffle=True, drop_last=False
+        shuffle=False, drop_last=False
     )
     valid_iterator = cycle(valid_loader)
     
-    while(1):
-        input = next(valid_iterator)
-        pdb.set_trace()
-    
     ###########################################################################
     """ preparation """
-    model = InstantNGP(config, bb)
-    loss = PictureLoss(config['loss'])
+    tensorboard_path = os.path.abspath(config['tensorboard_path'])
+    if not os.path.exists(tensorboard_path):
+        os.mkdir(tensorboard_path)
+    checkpoints_path = os.path.abspath(config['checkpoints_path'])
+    if not os.path.exists(checkpoints_path):
+        os.mkdir(checkpoints_path)
     
+    model = InstantNGP(config, bb, False)
+    loss = Loss()
+    optim = RAdam(
+        [
+            {'params': model.pos_enc.parameters(), 'weight_decay': 1e-6},
+            {'params': model.decoder.parameters(), 'eps': 1e-15}
+        ], lr=0.01, betas=(0.9, 0.99)
+    )
+    trainer = InstantNGPTrainer(optim, model, loss)
+    
+    trainer.cuda()
     
     ###########################################################################
     """ train & validation """
     for epoch in tqdm(range(config['epoches'])):
-        pass
+        trainer.train()
+        data = next(train_iterator)
+        # trainer.forward(data)
+        
+        if epoch % config['valid_iter'] == 0:
+            trainer.eval()
+            for pose in range(len(valid_data)):
+                valid_data = next(valid_iterator)
+                gt_image = valid_data['gt_image']
+                rendering = trainer.render(valid_data['rays'])
+                
+                
+            
+        if epoch % config['save_iter'] == 0:
+            trainer.save(checkpoints_path)
+        
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Training stylizer")

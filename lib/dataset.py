@@ -98,7 +98,6 @@ class NeRFSynthesicDataset(Dataset):
         #! normalize了，不然有点怪。尝试了HashNeRF发现norm不norm差别不大
         pts =  c2w[:3, -1].expand(self.H, self.W, 3)
         rays = torch.cat([dirs_world, pts], dim=-1)
-        
         # both tensors but not on cuda
         return {'rays' : rays, 'gt_image' : image}
     

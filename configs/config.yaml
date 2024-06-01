@@ -1,6 +1,6 @@
 data:
   type: nerf_synthesic
-  batch_size: 1
+  batch_size: 2
   near: 2.0
   far: 6.0
 
@@ -47,4 +47,8 @@ loss:
 
 epoches: 5000
 
-ckpt_path: log/
+tensorboard_path: log/
+checkpoints_path: ckpt/
+
+valid_iter: 100
+save_iter: 1000

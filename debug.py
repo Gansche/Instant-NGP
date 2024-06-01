@@ -15,8 +15,10 @@ data = dataset[0]
 
 bb = dataset.create_bounding_box().cuda()
 
-rays = data['rays'].view(-1,6)[:1024, ...].cuda()
+# rays = data['rays'].view(-1,6)[:1024, ...].cuda()
+rays = data['rays'].view(-1,6)[:2, ...].cuda()
 model = InstantNGP(config, bb).cuda()
 
 output = model(rays)
+
 pdb.set_trace()

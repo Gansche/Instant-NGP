@@ -1,19 +1,24 @@
 import math
+import pdb
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from .utils import sample_pdf
+
 ###############################################################################
 """ Instant NGP """
 
 class InstantNGP(nn.Module):
-    def __init__(self, cfg, bb) -> None:
+    def __init__(self, cfg, bb, importance = True) -> None:
         super(InstantNGP, self).__init__()
         
         self.cfg = cfg
+        self.importance = importance
         
         self.sampler = Sampler(cfg['sampler'])
+        # self.importance_sampler = ImportanceSampler(cfg['sampler'])
         self.pos_enc = HashGridEncoder(cfg['hash_grid_enc'], bb)
         # self.dir_enc = FrequencyEncoder(cfg['freq_enc'])
         self.dir_enc = SHEncoder(cfg['sh_enc'])
@@ -27,7 +32,7 @@ class InstantNGP(nn.Module):
             output: rgb and sigma (:, 3+1)
         """
         # sampling
-        pose, dirs, dists = self.sampler(rays)
+        pose, dirs, z_vals = self.sampler(rays)
         
         # encoding
         pose_enc = self.pos_enc(pose)
@@ -37,7 +42,17 @@ class InstantNGP(nn.Module):
         sigma, color = self.decoder(pose_enc, dirs_enc)
         
         # rendering
-        rgb = self.renderer(sigma ,color, dists)
+        rgb, weights = self.renderer(sigma ,color, z_vals)
+
+        if self.importance:
+
+            pose, z_vals = self.importance_sampler(rays, z_vals, weights)
+
+            pose_enc = self.pos_enc(pose)
+
+            sigma, color = self.decoder(pose_enc, dirs_enc)
+            
+            rgb, _ = self.renderer(sigma, color, z_vals)
 
         return rgb
         
@@ -67,17 +82,33 @@ class Sampler(nn.Module):
         lower = torch.cat([t_pt[...,:1], mid], -1)
         t_rand = torch.rand(t_pt.shape).cuda()
         t_pt = lower + (upper - lower) * t_rand
-        dists = torch.cat(
-            [
-                t_pt[...,1:] - t_pt[...,:-1], 
-                torch.tensor([1e10]).expand(t_pt[...,:1].shape).cuda()
-            ], dim=-1
-        )
+        # dists = torch.cat(
+        #     [
+        #         t_pt[...,1:] - t_pt[...,:-1], 
+        #         torch.tensor([1e10]).expand(t_pt[...,:1].shape).cuda()
+        #     ], dim=-1
+        # )
 
-        sampled_pts = (pts + dirs * t.unsqueeze(-1)).squeeze(0)
+        sampled_pts = (pts + dirs * t_pt.unsqueeze(-1)).squeeze(0)
         sampled_dirs = dirs.repeat(*([1] * (dirs.ndimension() - 2)), self.num_sample, 1)
         
-        return sampled_pts, sampled_dirs, dists
+        return sampled_pts, sampled_dirs, t_pt
+    
+class ImportanceSampler(nn.Module):
+    def __init__(self, cfg) -> None:
+        super(ImportanceSampler, self).__init__()
+        self.num_sample = cfg['num_N_importance']
+
+    def forward(self, rays, dists, weights):
+        dirs = rays[..., :3].unsqueeze(-2)
+        pts = rays[..., 3:].unsqueeze(-2)
+        dists_mid = .5 * (dists[...,1:] + dists[...,:-1])
+        new_dists = sample_pdf(dists_mid, weights.squeeze(-1)[...,1:-1], self.num_sample)
+        new_dists = new_dists.detach() ## 避免梯度计算？
+        dists, _ = torch.sort(torch.cat([dists, new_dists], -1), -1)
+
+        sampled_pts = (pts + dirs * dists.unsqueeze(-1)).squeeze(0)
+        return sampled_pts, dists
 
 ###############################################################################
 """ Encoder """
@@ -120,7 +151,7 @@ class HashGridEncoder(nn.Module):
         indices = min_index.unsqueeze(-2) + self.vertices
         return indices, min_vertex, max_vertex
     
-    def get_hash_indices(self, xyz):
+    def get_hash_indices(self, xyz):  ## hash function
         assert xyz.shape[-1] == 3
         result = torch.zeros_like(xyz)[..., 0]
         for i in range(xyz.shape[-1]):
@@ -151,10 +182,11 @@ class HashGridEncoder(nn.Module):
             embedded_indices = self.hash_grids[i](hash_indices)
             embedded_i = self.get_interpolation(
                 xyz,                    # [1024, 64, 3]
-                min_vertex, max_vertex, # [1024, 64, 8, 3]
+                min_vertex, max_vertex, # [1024, 64, 3]
                 embedded_indices        # [1024, 64, 8, 2]
             )
             embedded.append(embedded_i)
+            # pdb.set_trace()
         return torch.cat(embedded, dim=-1)
         
 class FrequencyEncoder(nn.Module):
@@ -316,11 +348,17 @@ class Renderer(nn.Module):
     def __init__(self, cfg) -> None:
         super(Renderer, self).__init__()
         
-    def forward(self, sigma, color, dists):
+    def forward(self, sigma, color, z_vals):
+        dists = torch.cat(
+            [
+                z_vals[...,1:] - z_vals[...,:-1], 
+                torch.tensor([1e10]).expand(z_vals[...,:1].shape).cuda()
+            ], dim=-1
+        )
         alpha = 1 - torch.exp((-1) * sigma * dists[..., None])
         temp = torch.cat((torch.ones_like(alpha[..., 0, :][..., None], dtype=torch.float32), 1.0 - alpha + 1e-10), dim=-2)
         T = torch.cumprod(temp[..., :-1, :], dim=-1)
-        weight = alpha * T
-        rgb = torch.sum(weight * color, dim=-2)
+        weights = alpha * T
+        rgb = torch.sum(weights * color, dim=-2)
         
-        return rgb
+        return rgb, weights
