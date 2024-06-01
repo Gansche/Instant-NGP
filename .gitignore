@@ -1,6 +1,7 @@
 # ignore 
 data/
 log/
+ckpt/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
