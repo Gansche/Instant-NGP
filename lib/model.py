@@ -18,7 +18,7 @@ class InstantNGP(nn.Module):
         self.importance = importance
         
         self.sampler = Sampler(cfg['sampler'])
-        # self.importance_sampler = ImportanceSampler(cfg['sampler'])
+        self.importance_sampler = ImportanceSampler(cfg['sampler'])
         self.pos_enc = HashGridEncoder(cfg['hash_grid_enc'], bb)
         # self.dir_enc = FrequencyEncoder(cfg['freq_enc'])
         self.dir_enc = SHEncoder(cfg['sh_enc'])
@@ -31,28 +31,25 @@ class InstantNGP(nn.Module):
             input: rays (:, o+d=6)
             output: rgb and sigma (:, 3+1)
         """
-        # sampling
-        pose, dirs, z_vals = self.sampler(rays)
-        
-        # encoding
-        pose_enc = self.pos_enc(pose)
-        dirs_enc = self.dir_enc(dirs)
-        
-        # nerfing
-        sigma, color = self.decoder(pose_enc, dirs_enc)
-        
-        # rendering
-        rgb, weights = self.renderer(sigma ,color, z_vals)
-
         if self.importance:
-
+            with torch.no_grad():
+                pose, dirs, z_vals = self.sampler(rays)
+                pose_enc = self.pos_enc(pose)
+                dirs_enc = self.dir_enc(dirs)
+                sigma, color = self.decoder(pose_enc, dirs_enc)
+                rgb, weights = self.renderer(sigma ,color, z_vals)
+                
             pose, z_vals = self.importance_sampler(rays, z_vals, weights)
-
             pose_enc = self.pos_enc(pose)
-
             sigma, color = self.decoder(pose_enc, dirs_enc)
-            
             rgb, _ = self.renderer(sigma, color, z_vals)
+            
+        else:
+            pose, dirs, z_vals = self.sampler(rays)
+            pose_enc = self.pos_enc(pose)
+            dirs_enc = self.dir_enc(dirs)
+            sigma, color = self.decoder(pose_enc, dirs_enc)
+            rgb, _ = self.renderer(sigma ,color, z_vals)
 
         return rgb
         

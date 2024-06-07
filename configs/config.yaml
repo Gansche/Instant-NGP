@@ -1,6 +1,6 @@
 data:
   type: nerf_synthesic
-  batch_size: 2
+  batch_size: 1
   near: 2.0
   far: 6.0
 
@@ -8,6 +8,7 @@ sampler:
   near: 2.0
   far: 6.0
   num_sample: 64
+  num_N_importance:
 
 hash_grid_enc:
   L: 16
@@ -50,5 +51,5 @@ epoches: 5000
 tensorboard_path: log/
 checkpoints_path: ckpt/
 
-valid_iter: 100
+valid_iter: 500
 save_iter: 1000

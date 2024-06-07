@@ -1,6 +1,7 @@
 import os
 import yaml
 import random
+import imageio
 import argparse
 import numpy as np
 from tqdm import tqdm
@@ -34,7 +35,7 @@ def training(config, args):
     bb = dataset.create_bounding_box().cuda()
     
     # split dataset
-    pivot = int(len(dataset) * 0.8)
+    pivot = int(len(dataset) * 0.95)
     train_data, valid_data = random_split(dataset, [pivot, len(dataset) - pivot])
     
     # train dataset
@@ -60,7 +61,7 @@ def training(config, args):
     if not os.path.exists(checkpoints_path):
         os.mkdir(checkpoints_path)
     
-    model = InstantNGP(config, bb, False)
+    model = InstantNGP(config, bb)
     loss = Loss()
     optim = RAdam(
         [
@@ -77,19 +78,25 @@ def training(config, args):
     for epoch in tqdm(range(config['epoches'])):
         trainer.train()
         data = next(train_iterator)
-        # trainer.forward(data)
         
-        if epoch % config['valid_iter'] == 0:
+        loss_list = trainer.run(data)
+        assert len(loss_list) == 1
+        
+        writer.add_scalars('Loss', {'Training': loss_list[0]}, epoch)
+
+        if epoch % config['valid_iter'] == 0 and epoch != 0:
             trainer.eval()
             for pose in range(len(valid_data)):
                 valid_data = next(valid_iterator)
-                gt_image = valid_data['gt_image']
-                rendering = trainer.render(valid_data['rays'])
+                gt_image = valid_data['gt_image'].squeeze(0)
+                pred_image = trainer.render(valid_data['rays'])
+                imageio.imwrite('renderings/' + 'gt_image' + '_{0:05d}'.format(pose) + '.png', (gt_image.numpy()).astype(np.uint8))
+                imageio.imwrite('renderings/' + 'pred_image' + '_{0:05d}'.format(pose) + '.png', (pred_image.numpy() * 255).astype(np.uint8))
                 
                 
-            
-        if epoch % config['save_iter'] == 0:
-            trainer.save(checkpoints_path)
+        if epoch % config['save_iter'] == 1 and epoch != 0:
+            ckpt = trainer.save(config, epoch)
+            torch.save(ckpt, os.path.join(checkpoints_path, 'ckpt_' + '{0:05d}_epoch'.format(epoch) + '.pth'))
         
 
 if __name__ == "__main__":
