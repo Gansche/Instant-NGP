@@ -31,9 +31,9 @@ ZJU CG2023 Final Project
 - [x] 其实可以先写dataset
     - 数据集写了能加载数据 但是跟没写一样，因为不知道后面咋用
 - [x] 写主要的模型
-- [ ] 写loss
-- [ ] 调试以后写train
-- [ ] run!
+- [x] 写loss
+- [x] 调试以后写train
+- [x] run!
 - [ ] 自采数据集 colmap标定 需要读colmap
 
 
