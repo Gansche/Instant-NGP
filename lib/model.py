@@ -11,11 +11,11 @@ from .utils import sample_pdf
 """ Instant NGP """
 
 class InstantNGP(nn.Module):
-    def __init__(self, cfg, bb, importance = True) -> None:
+    def __init__(self, cfg, bb) -> None:
         super(InstantNGP, self).__init__()
         
         self.cfg = cfg
-        self.importance = importance
+        self.importance = cfg['sampler']['importance']
         
         self.sampler = Sampler(cfg['sampler'])
         self.importance_sampler = ImportanceSampler(cfg['sampler'])
@@ -32,8 +32,9 @@ class InstantNGP(nn.Module):
             output: rgb and sigma (:, 3+1)
         """
         if self.importance:
+
             with torch.no_grad():
-                pose, dirs, z_vals = self.sampler(rays)
+                pose, dirs, dirs_importance, z_vals = self.sampler(rays)
                 pose_enc = self.pos_enc(pose)
                 dirs_enc = self.dir_enc(dirs)
                 sigma, color = self.decoder(pose_enc, dirs_enc)
@@ -41,7 +42,8 @@ class InstantNGP(nn.Module):
                 
             pose, z_vals = self.importance_sampler(rays, z_vals, weights)
             pose_enc = self.pos_enc(pose)
-            sigma, color = self.decoder(pose_enc, dirs_enc)
+            dirs_enc_importance = self.dir_enc(dirs_importance)
+            sigma, color = self.decoder(pose_enc, dirs_enc_importance)
             rgb, _ = self.renderer(sigma, color, z_vals)
             
         else:
@@ -63,6 +65,7 @@ class Sampler(nn.Module):
         self.near = cfg['near']
         self.far = cfg['far']
         self.num_sample = cfg['num_sample']
+        self.num_importance_sample = cfg['num_importance']
         
     def forward(self, rays):
         #! normalize的
@@ -71,37 +74,35 @@ class Sampler(nn.Module):
         
         t = torch.linspace(self.near, self.far, self.num_sample).cuda()
         
-        # perturb
         repeat_times = rays.shape[:-1] + tuple(1 for _ in range(len(t.shape)))
         t_pt = t.repeat(repeat_times)
+        
+        # perturb
         mid = (t_pt[...,1:] +t_pt[...,:-1]) * 0.5
         upper = torch.cat([mid, t_pt[...,-1:]], -1)
         lower = torch.cat([t_pt[...,:1], mid], -1)
         t_rand = torch.rand(t_pt.shape).cuda()
         t_pt = lower + (upper - lower) * t_rand
-        # dists = torch.cat(
-        #     [
-        #         t_pt[...,1:] - t_pt[...,:-1], 
-        #         torch.tensor([1e10]).expand(t_pt[...,:1].shape).cuda()
-        #     ], dim=-1
-        # )
-
-        sampled_pts = (pts + dirs * t_pt.unsqueeze(-1)).squeeze(0)
-        sampled_dirs = dirs.repeat(*([1] * (dirs.ndimension() - 2)), self.num_sample, 1)
         
-        return sampled_pts, sampled_dirs, t_pt
+        t = t_pt
+
+        sampled_pts = (pts + dirs * t.unsqueeze(-1)).squeeze(0)
+        sampled_dirs = dirs.repeat(*([1] * (dirs.ndimension() - 2)), self.num_sample, 1)
+        sampled_dirs_importance = dirs.repeat(*([1] * (dirs.ndimension() - 2)), self.num_sample + self.num_importance_sample, 1)
+
+        return sampled_pts, sampled_dirs, sampled_dirs_importance, t
     
 class ImportanceSampler(nn.Module):
     def __init__(self, cfg) -> None:
         super(ImportanceSampler, self).__init__()
-        self.num_sample = cfg['num_N_importance']
+        self.num_sample = cfg['num_importance']
 
     def forward(self, rays, dists, weights):
         dirs = rays[..., :3].unsqueeze(-2)
         pts = rays[..., 3:].unsqueeze(-2)
-        dists_mid = .5 * (dists[...,1:] + dists[...,:-1])
+        dists_mid = 0.5 * (dists[...,1:] + dists[...,:-1])
         new_dists = sample_pdf(dists_mid, weights.squeeze(-1)[...,1:-1], self.num_sample)
-        new_dists = new_dists.detach() ## 避免梯度计算？
+        # new_dists = new_dists.detach() ## 避免梯度计算？
         dists, _ = torch.sort(torch.cat([dists, new_dists], -1), -1)
 
         sampled_pts = (pts + dirs * dists.unsqueeze(-1)).squeeze(0)
@@ -334,8 +335,8 @@ class SimplifiedNeuralRadianceField(nn.Module):
         output = self.sigma_model(pos_enc)
         sigma = F.relu(output[..., 0].unsqueeze(-1))
         latent_vc = output[..., 1:]
-        
         color = self.color_model(torch.cat((view_enc, latent_vc), dim=-1))
+
         return sigma, color
 
 ###############################################################################
@@ -352,9 +353,9 @@ class Renderer(nn.Module):
                 torch.tensor([1e10]).expand(z_vals[...,:1].shape).cuda()
             ], dim=-1
         )
-        alpha = 1 - torch.exp((-1) * sigma * dists[..., None])
+        alpha = 1.0 - torch.exp((-1) * sigma * dists[..., None])
         temp = torch.cat((torch.ones_like(alpha[..., 0, :][..., None], dtype=torch.float32), 1.0 - alpha + 1e-10), dim=-2)
-        T = torch.cumprod(temp[..., :-1, :], dim=-1)
+        T = torch.cumprod(temp[..., :-1, :], dim=-2)
         weights = alpha * T
         rgb = torch.sum(weights * color, dim=-2)
         

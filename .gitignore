@@ -3,6 +3,7 @@ data/
 log/
 ckpt/
 history/
+renderings/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

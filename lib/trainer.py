@@ -33,11 +33,12 @@ class InstantNGPTrainer():
     def eval(self):
         self.model.eval()
         
-    def run(self, input, batch_size=4096):
+    def run(self, epoch, input, batch_size=4096):
         rays = input['rays']
         targets = input['gt_image']
         
         # actually batch processing is meaningless here
+        assert rays.shape[0] == 1
         loss_list = []
         for i in range(rays.shape[0]):
             ray = rays[i].cuda()
@@ -57,6 +58,12 @@ class InstantNGPTrainer():
             self.optim.zero_grad()
             loss.backward()
             self.optim.step()
+            
+            decay_rate = 0.1
+            decay_steps = 10 * 1000
+            new_lrate = 0.01 * (decay_rate ** (epoch / decay_steps))
+            for param_group in self.optim.param_groups:
+                param_group['lr'] = new_lrate
             
             loss_list.append(loss)
             

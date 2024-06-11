@@ -3,6 +3,9 @@ import json
 import math
 import imageio 
 import random
+import numpy as np
+
+import cv2
 
 import torch
 from torch.utils.data import Dataset
@@ -21,6 +24,7 @@ class NeRFSynthesicDataset(Dataset):
         self.data_path = data_path
         self.near = cfg['near']
         self.far = cfg['far']
+        self.half_size = cfg['half_size']
         
         # load transforms
         frames = []
@@ -40,6 +44,10 @@ class NeRFSynthesicDataset(Dataset):
         self.H = image.shape[0]
         self.W = image.shape[1]
         self.focal = 0.5 * self.W / math.tan(0.5 * camera_angle_x)
+        if self.half_size:
+            self.H =  self.H // 2
+            self.W =  self.W // 2
+            self.focal =  self.focal / 2.0
 
     def create_bounding_box(self):
         def create_boundary(c2w):
@@ -83,6 +91,10 @@ class NeRFSynthesicDataset(Dataset):
         # load ground truth image
         file_path = os.path.join(self.data_path, self.frame_set[index]['file_path'][2:]) + '.png'
         image = imageio.v2.imread(file_path)
+        
+        # half-size
+        if self.half_size:
+            image = cv2.resize(image, (self.W, self.H), interpolation=cv2.INTER_AREA)
         image = torch.tensor(image, dtype=torch.float32)
         
         # generate rays

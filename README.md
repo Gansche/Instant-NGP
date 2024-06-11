@@ -35,7 +35,8 @@ ZJU CG2023 Final Project
 - [x] 调试以后写train
 - [x] run!
 - [ ] 自采数据集 colmap标定 需要读colmap
-
+- [ ] loss更新
+- [ ] lr更新
 
 
 1. 第一阶段实现文章中提到的编码方式以及用一种数据集就可以了

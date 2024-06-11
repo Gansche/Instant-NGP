@@ -8,8 +8,9 @@ def sample_pdf(bins, weights, N_importance, eps=1e-5):
     cdf = torch.cumsum(pdf, -1)
     cdf = torch.cat([torch.zeros_like(cdf[..., :1], device=device), cdf], -1)
 
-    u = torch.linspace(0. + 0.5 / N_importance, 1. - 0.5 / N_importance, steps=N_importance, device=device)
-    u = u.expand(list(cdf.shape[:-1]) + [N_importance])
+    u = torch.rand(list(cdf.shape[:-1]) + [N_importance], device=device)
+    # u = torch.linspace(0. + 0.5 / N_importance, 1. - 0.5 / N_importance, steps=N_importance, device=device)
+    # u = u.expand(list(cdf.shape[:-1]) + [N_importance])
 
     u = u.contiguous()
     inds = torch.searchsorted(cdf, u, right=True)
@@ -25,7 +26,5 @@ def sample_pdf(bins, weights, N_importance, eps=1e-5):
     denom = torch.where(denom < eps, torch.ones_like(denom, device=device), denom)
     t = (u - cdf_below) / denom
     samples = bins_below + t * (bins_above - bins_below)
-
-    pdb.set_trace()
 
     return samples
