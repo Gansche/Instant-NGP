@@ -2,8 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-import pdb
-
 class InstantNGPTrainer():
     def __init__(self, optim, model, loss) -> None:
         self.optim = optim
@@ -82,7 +80,7 @@ class InstantNGPTrainer():
         renderings = []
         for i in range(H * W // batch_size + 1):
             with torch.no_grad():
-                rendering = self.model(rays_reshape[i * batch_size : (i + 1) * batch_size].cuda())
+                rendering = self.model(rays_reshape[i * batch_size : (i + 1) * batch_size].cuda(), False, True)
             renderings.append(rendering.cpu())
         image = torch.cat(renderings, dim=0).reshape(H, W, 3)
         return image

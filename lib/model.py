@@ -15,7 +15,6 @@ class InstantNGP(nn.Module):
         super(InstantNGP, self).__init__()
         
         self.cfg = cfg
-        self.importance = cfg['sampler']['importance']
         
         self.sampler = Sampler(cfg['sampler'])
         self.importance_sampler = ImportanceSampler(cfg['sampler'])
@@ -25,33 +24,33 @@ class InstantNGP(nn.Module):
         self.decoder = SimplifiedNeuralRadianceField(cfg['decoder'])
         self.renderer = Renderer(cfg['renderer'])
         
-    def forward(self, rays):
+    def forward(self, rays, perturb=True, importance=True):
         """
         Args:
             input: rays (:, o+d=6)
             output: rgb and sigma (:, 3+1)
         """
-        if self.importance:
+        if importance:
 
             with torch.no_grad():
-                pose, dirs, dirs_importance, z_vals = self.sampler(rays)
+                pose, dirs, dirs_importance, z_vals = self.sampler(rays, perturb)
                 pose_enc = self.pos_enc(pose)
                 dirs_enc = self.dir_enc(dirs)
                 sigma, color = self.decoder(pose_enc, dirs_enc)
-                rgb, weights = self.renderer(sigma ,color, z_vals)
+                rgb, weights = self.renderer(sigma ,color, z_vals, rays)
                 
-            pose, z_vals = self.importance_sampler(rays, z_vals, weights)
+            pose, z_vals = self.importance_sampler(rays, z_vals, weights, perturb)
             pose_enc = self.pos_enc(pose)
             dirs_enc_importance = self.dir_enc(dirs_importance)
             sigma, color = self.decoder(pose_enc, dirs_enc_importance)
-            rgb, _ = self.renderer(sigma, color, z_vals)
+            rgb, _ = self.renderer(sigma, color, z_vals, rays)
             
         else:
-            pose, dirs, z_vals = self.sampler(rays)
+            pose, dirs, _, z_vals = self.sampler(rays, perturb)
             pose_enc = self.pos_enc(pose)
             dirs_enc = self.dir_enc(dirs)
             sigma, color = self.decoder(pose_enc, dirs_enc)
-            rgb, _ = self.renderer(sigma ,color, z_vals)
+            rgb, _ = self.renderer(sigma ,color, z_vals, rays)
 
         return rgb
         
@@ -67,7 +66,7 @@ class Sampler(nn.Module):
         self.num_sample = cfg['num_sample']
         self.num_importance_sample = cfg['num_importance']
         
-    def forward(self, rays):
+    def forward(self, rays, perturb):
         #! normalize的
         dirs = rays[..., :3].unsqueeze(-2)
         pts = rays[..., 3:].unsqueeze(-2)
@@ -76,13 +75,13 @@ class Sampler(nn.Module):
         
         repeat_times = rays.shape[:-1] + tuple(1 for _ in range(len(t.shape)))
         t_pt = t.repeat(repeat_times)
-        
-        # perturb
-        mid = (t_pt[...,1:] +t_pt[...,:-1]) * 0.5
-        upper = torch.cat([mid, t_pt[...,-1:]], -1)
-        lower = torch.cat([t_pt[...,:1], mid], -1)
-        t_rand = torch.rand(t_pt.shape).cuda()
-        t_pt = lower + (upper - lower) * t_rand
+        # pdb.set_trace()
+        if perturb:
+            mid = (t_pt[...,1:] + t_pt[...,:-1]) * 0.5
+            upper = torch.cat([mid, t_pt[...,-1:]], -1)
+            lower = torch.cat([t_pt[...,:1], mid], -1)
+            t_rand = torch.rand(t_pt.shape).cuda()
+            t_pt = lower + (upper - lower) * t_rand
         
         t = t_pt
 
@@ -90,6 +89,8 @@ class Sampler(nn.Module):
         sampled_dirs = dirs.repeat(*([1] * (dirs.ndimension() - 2)), self.num_sample, 1)
         sampled_dirs_importance = dirs.repeat(*([1] * (dirs.ndimension() - 2)), self.num_sample + self.num_importance_sample, 1)
 
+        sampled_dirs = sampled_dirs / torch.norm(sampled_dirs, dim=-1, keepdim=True)
+        sampled_dirs_importance = sampled_dirs_importance / torch.norm(sampled_dirs_importance, dim=-1, keepdim=True)
         return sampled_pts, sampled_dirs, sampled_dirs_importance, t
     
 class ImportanceSampler(nn.Module):
@@ -97,11 +98,11 @@ class ImportanceSampler(nn.Module):
         super(ImportanceSampler, self).__init__()
         self.num_sample = cfg['num_importance']
 
-    def forward(self, rays, dists, weights):
+    def forward(self, rays, dists, weights, perturb):
         dirs = rays[..., :3].unsqueeze(-2)
         pts = rays[..., 3:].unsqueeze(-2)
         dists_mid = 0.5 * (dists[...,1:] + dists[...,:-1])
-        new_dists = sample_pdf(dists_mid, weights.squeeze(-1)[...,1:-1], self.num_sample)
+        new_dists = sample_pdf(dists_mid, weights.squeeze(-1)[...,1:-1], self.num_sample, perturb)
         # new_dists = new_dists.detach() ## 避免梯度计算？
         dists, _ = torch.sort(torch.cat([dists, new_dists], -1), -1)
 
@@ -145,7 +146,7 @@ class HashGridEncoder(nn.Module):
         cell = (self.bb_max - self.bb_min) / self.resolutions[i]
         min_index = torch.floor((xyz - self.bb_min) / cell).int()
         min_vertex = min_index * cell + self.bb_min
-        max_vertex = min_vertex + torch.tensor([1, 1, 1]).cuda() * cell
+        max_vertex = min_vertex + torch.tensor([1.0, 1.0, 1.0]).cuda() * cell
         indices = min_index.unsqueeze(-2) + self.vertices
         return indices, min_vertex, max_vertex
     
@@ -154,7 +155,7 @@ class HashGridEncoder(nn.Module):
         result = torch.zeros_like(xyz)[..., 0]
         for i in range(xyz.shape[-1]):
             result ^= xyz[..., i] * self.pi[i]
-        return result % self.T
+        return torch.tensor((1<<19)-1).to(result.device) & result
 
     def get_interpolation(self, xyz, min_v, max_v, emb_indices):
         d = (xyz - min_v) / (max_v - min_v)
@@ -170,7 +171,7 @@ class HashGridEncoder(nn.Module):
     def forward(self, xyz):
         """
         Args:
-            x (tensor): input position
+            xyz (tensor): input position
         """
         assert xyz.shape[-1] == 3
         embedded = []
@@ -184,7 +185,6 @@ class HashGridEncoder(nn.Module):
                 embedded_indices        # [1024, 64, 8, 2]
             )
             embedded.append(embedded_i)
-            # pdb.set_trace()
         return torch.cat(embedded, dim=-1)
         
 class FrequencyEncoder(nn.Module):
@@ -346,13 +346,15 @@ class Renderer(nn.Module):
     def __init__(self, cfg) -> None:
         super(Renderer, self).__init__()
         
-    def forward(self, sigma, color, z_vals):
+    def forward(self, sigma, color, z_vals, rays):
         dists = torch.cat(
             [
                 z_vals[...,1:] - z_vals[...,:-1], 
                 torch.tensor([1e10]).expand(z_vals[...,:1].shape).cuda()
             ], dim=-1
         )
+        dirs = rays[..., :3].unsqueeze(-2)
+        dists = dists * torch.norm(dirs, dim=-1)
         alpha = 1.0 - torch.exp((-1) * sigma * dists[..., None])
         temp = torch.cat((torch.ones_like(alpha[..., 0, :][..., None], dtype=torch.float32), 1.0 - alpha + 1e-10), dim=-2)
         T = torch.cumprod(temp[..., :-1, :], dim=-2)

@@ -109,7 +109,7 @@ def training(config, args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Training stylizer")
     parser.add_argument('-c', '--config_path', type=str, default='configs/config.yaml', help='config file path')
-    parser.add_argument('-d', '--data_path', type=str, default='data/lego', help='config file path')
+    parser.add_argument('-d', '--data_path', type=str, default='data/hotdog', help='config file path')
     args = parser.parse_args()
     
     try:

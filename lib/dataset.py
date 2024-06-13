@@ -59,7 +59,7 @@ class NeRFSynthesicDataset(Dataset):
                     dtype=torch.float32
                 )
                 ray = ray @ c2w[:3, :3].T
-                ray = ray / torch.norm(ray, dim=-1, keepdim=True)
+                # ray = ray / torch.norm(ray, dim=-1, keepdim=True)
                 pts = c2w[:3, -1]
                 boundary.append(pts + ray * self.near)
                 boundary.append(pts + ray * self.far)
@@ -106,7 +106,7 @@ class NeRFSynthesicDataset(Dataset):
         )
         dirs = torch.stack([(x - self.W * 0.5) / self.focal, -(y - self.H * 0.5) / self.focal, -torch.ones_like(x)], -1)
         dirs_world = dirs @ c2w[:3, :3].T
-        dirs_world = dirs_world / torch.norm(dirs_world, dim=-1, keepdim=True)
+        # dirs_world = dirs_world / torch.norm(dirs_world, dim=-1, keepdim=True)
         #! normalize了，不然有点怪。尝试了HashNeRF发现norm不norm差别不大
         pts =  c2w[:3, -1].expand(self.H, self.W, 3)
         rays = torch.cat([dirs_world, pts], dim=-1)

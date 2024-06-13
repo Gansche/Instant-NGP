@@ -1,16 +1,18 @@
 import torch
 import pdb
 
-def sample_pdf(bins, weights, N_importance, eps=1e-5):
+def sample_pdf(bins, weights, N_importance, perturb, eps=1e-5):
     device = weights.device
     weights = weights + eps
     pdf = weights / torch.sum(weights, -1, keepdim=True)
     cdf = torch.cumsum(pdf, -1)
     cdf = torch.cat([torch.zeros_like(cdf[..., :1], device=device), cdf], -1)
 
-    u = torch.rand(list(cdf.shape[:-1]) + [N_importance], device=device)
-    # u = torch.linspace(0. + 0.5 / N_importance, 1. - 0.5 / N_importance, steps=N_importance, device=device)
-    # u = u.expand(list(cdf.shape[:-1]) + [N_importance])
+    if perturb:
+        u = torch.rand(list(cdf.shape[:-1]) + [N_importance], device=device)
+    else:
+        u = torch.linspace(0. + 0.5 / N_importance, 1. - 0.5 / N_importance, steps=N_importance, device=device)
+        u = u.expand(list(cdf.shape[:-1]) + [N_importance])
 
     u = u.contiguous()
     inds = torch.searchsorted(cdf, u, right=True)
