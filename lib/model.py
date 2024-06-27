@@ -18,11 +18,19 @@ class InstantNGP(nn.Module):
         
         self.sampler = Sampler(cfg['sampler'])
         self.importance_sampler = ImportanceSampler(cfg['sampler'])
-        self.pos_enc = HashGridEncoder(cfg['hash_grid_enc'], bb)
-        # self.dir_enc = FrequencyEncoder(cfg['freq_enc'])
-        self.dir_enc = SHEncoder(cfg['sh_enc'])
-        self.decoder = SimplifiedNeuralRadianceField(cfg['decoder'])
+
+        if 'hash' in cfg['decoder'].lower():
+            self.decoder = SimplifiedNeuralRadianceField(cfg['decoder1'])
+            self.pos_enc = HashGridEncoder(cfg['hash_grid_enc'], bb)
+            self.dir_enc = SHEncoder(cfg['sh_enc'])
+        else:
+            self.decoder = NeuralRadianceField(cfg['decoder2'])
+            self.pos_enc = FrequencyEncoder(cfg['pos_freq_enc'])
+            self.dir_enc = FrequencyEncoder(cfg['dir_freq_enc'])
+        
         self.renderer = Renderer(cfg['renderer'])
+        
+        # pdb.set_trace()
         
     def forward(self, rays, perturb=True, importance=True):
         """
@@ -30,6 +38,7 @@ class InstantNGP(nn.Module):
             input: rays (:, o+d=6)
             output: rgb and sigma (:, 3+1)
         """
+        
         if importance:
 
             with torch.no_grad():
@@ -37,7 +46,7 @@ class InstantNGP(nn.Module):
                 pose_enc = self.pos_enc(pose)
                 dirs_enc = self.dir_enc(dirs)
                 sigma, color = self.decoder(pose_enc, dirs_enc)
-                rgb, weights = self.renderer(sigma ,color, z_vals, rays)
+                rgb0, weights = self.renderer(sigma ,color, z_vals, rays)
                 
             pose, z_vals = self.importance_sampler(rays, z_vals, weights, perturb)
             pose_enc = self.pos_enc(pose)
@@ -46,13 +55,18 @@ class InstantNGP(nn.Module):
             rgb, _ = self.renderer(sigma, color, z_vals, rays)
             
         else:
+            # print('Init')
             pose, dirs, _, z_vals = self.sampler(rays, perturb)
             pose_enc = self.pos_enc(pose)
             dirs_enc = self.dir_enc(dirs)
             sigma, color = self.decoder(pose_enc, dirs_enc)
             rgb, _ = self.renderer(sigma ,color, z_vals, rays)
 
-        return rgb
+        ret = {'rgb': rgb}
+        if importance:
+            ret['rgb0'] = rgb0
+
+        return ret
         
 
 ###############################################################################
@@ -103,7 +117,7 @@ class ImportanceSampler(nn.Module):
         pts = rays[..., 3:].unsqueeze(-2)
         dists_mid = 0.5 * (dists[...,1:] + dists[...,:-1])
         new_dists = sample_pdf(dists_mid, weights.squeeze(-1)[...,1:-1], self.num_sample, perturb)
-        # new_dists = new_dists.detach() ## 避免梯度计算？
+        new_dists = new_dists.detach() ## 避免梯度计算？
         dists, _ = torch.sort(torch.cat([dists, new_dists], -1), -1)
 
         sampled_pts = (pts + dirs * dists.unsqueeze(-1)).squeeze(0)
@@ -199,9 +213,11 @@ class FrequencyEncoder(nn.Module):
             enc(p) = (sin(2^0p), cos(2^0p) ... sin(2^(2L-1)p), cos(2^(2L-1)p))
         """
         enc_x = []
+        enc_x.append(x)
         for i in range(self.L * 2):
             for func in self.funcs:
                 enc_x.append(func(x * (2 ** i)))
+        # pdb.set_trace()
         return torch.cat(enc_x, dim=-1)
     
 class SHEncoder(nn.Module):
@@ -336,6 +352,62 @@ class SimplifiedNeuralRadianceField(nn.Module):
         sigma = F.relu(output[..., 0].unsqueeze(-1))
         latent_vc = output[..., 1:]
         color = self.color_model(torch.cat((view_enc, latent_vc), dim=-1))
+        # pdb.set_trace()
+
+        return sigma, color
+    
+class NeuralRadianceField(nn.Module):
+    def __init__(self,cfg) -> None:
+        super(NeuralRadianceField, self).__init__()
+        
+        self.pos_dim = cfg['pos_dim']
+        self.view_dim = cfg['view_dim']
+        
+        self.cfg_sigma = cfg['sigma_net']
+        sigma_model1 = nn.Sequential()
+        sigma_model1.append(nn.Linear(self.pos_dim, self.cfg_sigma['hidden_dim']))
+        sigma_model1.append(nn.ReLU())
+        for i in range(self.cfg_sigma['num_layers'] // 2):
+            sigma_model1.append(nn.Linear(self.cfg_sigma['hidden_dim'], self.cfg_sigma['hidden_dim']))
+            sigma_model1.append(nn.ReLU())
+        self.sigma_model1 = sigma_model1
+
+        sigma_model2 = nn.Sequential()
+        sigma_model2.append(nn.Linear(self.pos_dim + self.cfg_sigma['hidden_dim'], self.cfg_sigma['hidden_dim']))
+        sigma_model2.append(nn.ReLU())
+        for i in range(self.cfg_sigma['num_layers'] // 2 - 2):
+            sigma_model2.append(nn.Linear(self.cfg_sigma['hidden_dim'], self.cfg_sigma['hidden_dim']))
+            sigma_model2.append(nn.ReLU())
+        self.sigma_model2 = sigma_model2
+
+        sigma_linear = nn.Sequential()
+        sigma_linear.append(nn.Linear(self.cfg_sigma['hidden_dim'], 1))
+        sigma_linear.append(nn.ReLU())
+        self.sigma_linear = sigma_linear
+
+        color_model = nn.Sequential()
+        color_model.append(nn.Linear(self.view_dim + self.cfg_sigma['hidden_dim'], self.cfg_sigma['hidden_dim'] // 2))
+        color_model.append(nn.ReLU())
+        color_model.append(nn.Linear(self.cfg_sigma['hidden_dim'] // 2, 3))
+        color_model.append(nn.Sigmoid())
+        self.color_model = color_model
+        # pdb.set_trace()
+        
+    def forward(self, pos_enc, view_enc):
+        """
+        Args:
+            enc_position (tensor): encoded position information (..., ?)
+            enc_view (tensor): encoded view information (..., ?)
+            
+            sigma (tensor): sigma (..., 1)
+            color (tensor): color (..., 3)
+        """
+        # pdb.set_trace()
+        output1 = self.sigma_model1(pos_enc)
+        output2 = self.sigma_model2(torch.cat([pos_enc, output1], -1))
+        sigma = self.sigma_linear(output2)
+        color = self.color_model(torch.cat([output2, view_enc], -1))
+        # pdb.set_trace()
 
         return sigma, color
 

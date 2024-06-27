@@ -1,12 +1,12 @@
 data:
   type: nerf_synthesic
-  half_size: True
+  half_size: False
   batch_size: 1
   near: 2.0
   far: 6.0
 
 sampler:
-  importance: True
+  importance: False
   near: 2.0
   far: 6.0
   num_sample: 64
@@ -19,14 +19,19 @@ hash_grid_enc:
   N_min: 16
   N_max: 512
 
-freq_enc:
-  L: 3
+dir_freq_enc:
+  L: 2
+
+pos_freq_enc:
+  L: 5
 
 sh_enc:
   input_dim: 3
   degree: 4
 
-decoder:
+decoder: 'NeRF'
+
+decoder1:
   pos_dim: 32
   view_dim: 16
 
@@ -40,6 +45,14 @@ decoder:
     hidden_dim: 64
     out_dim: 3
 
+decoder2:
+  pos_dim: 63
+  view_dim: 27
+
+  sigma_net:
+    num_layers: 8
+    hidden_dim: 256
+
 renderer:
 
 trainer:
@@ -48,10 +61,10 @@ trainer:
 
 loss:
 
-epoches: 10000
+epoches: 1000
 
 tensorboard_path: log/
 checkpoints_path: ckpt/
 
-valid_iter: 1000
-save_iter: 5000
+valid_iter: 999
+save_iter: 9999

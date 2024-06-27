@@ -29,11 +29,9 @@ def training(config, args):
     torch.manual_seed(0)
     torch.cuda.manual_seed(0)
     
-    writer = SummaryWriter(config['tensorboard_path'])
-    
     ###########################################################################
     """ dataset """
-    dataset =  make_dataset(config['data'], args.data_path)
+    dataset =  make_dataset(config['data'], 'data/' + args.data_path)
     bb = dataset.create_bounding_box().cuda()
     
     # split dataset
@@ -62,18 +60,31 @@ def training(config, args):
     checkpoints_path = os.path.abspath(config['checkpoints_path'])
     if not os.path.exists(checkpoints_path):
         os.mkdir(checkpoints_path)
+        
+    writer = SummaryWriter(config['tensorboard_path'] + args.data_path)
     
     model = InstantNGP(config, bb)
     loss = Loss()
-    optim = RAdam(
-        [
-            {'params': model.pos_enc.parameters(), 'weight_decay': 1e-6},
-            {'params': model.decoder.parameters(), 'eps': 1e-15}
-        ], lr=0.01, betas=(0.9, 0.99)
-    )
+    # optim = RAdam(
+    #     [
+    #         {'params': model.pos_enc.parameters(), 'weight_decay': 1e-6},
+    #         {'params': model.decoder.parameters(), 'eps': 1e-15}
+    #     ], lr=0.01, betas=(0.9, 0.99)
+    # )
+    optim = torch.optim.Adam(params=model.decoder.parameters(), lr=0.01, betas=(0.9, 0.999))
     trainer = InstantNGPTrainer(optim, model, loss)
     
     trainer.cuda()
+    
+    folder_name = 'renderings/' + args.data_path
+    if os.path.exists(folder_name):
+        os.rmdir(folder_name)
+    os.mkdir(folder_name)
+    
+    os.mkdir(folder_name + '/gt_image')
+    for pose, valid_data in enumerate(valid_loader):
+        gt_image = valid_data['gt_image'].squeeze(0)
+        imageio.imwrite(folder_name + '/gt_image/' + '{0:05d}'.format(pose) + '.png', (gt_image.numpy()).astype(np.uint8))
     
     ###########################################################################
     """ train & validation """
@@ -87,29 +98,25 @@ def training(config, args):
         writer.add_scalars('Loss', {'Training': loss_list[0]}, epoch)
 
         if epoch % config['valid_iter'] == 0 and epoch != 0:
-            trainer.eval()
-            folder_name = 'renderings/epoch_{0:05d}'.format(epoch)
+            folder_name = 'renderings/' + args.data_path + '/epoch_{0:05d}'.format(epoch)
             if os.path.exists(folder_name):
                 os.rmdir(folder_name)
             os.mkdir(folder_name)
-
+            trainer.eval()
             for pose, valid_data in enumerate(valid_loader):
-                gt_image = valid_data['gt_image'].squeeze(0)
                 pred_image = trainer.render(valid_data['rays'])
                 pred_image = to8b(pred_image.numpy())
-                imageio.imwrite(folder_name + '/gt_image' + '_{0:05d}'.format(pose) + '.png', (gt_image.numpy()).astype(np.uint8))
-                # imageio.imwrite('renderings/epoch_{0:05d}/'.format(epoch) + 'pred_image' + '_{0:05d}'.format(pose) + '.png', (pred_image.numpy() * 255).astype(np.uint8))
-                imageio.imwrite(folder_name + '/pred_image' + '_{0:05d}'.format(pose) + '.png', (pred_image).astype(np.uint8))
+                imageio.imwrite(folder_name + '/{0:05d}'.format(pose) + '.png', (pred_image).astype(np.uint8))
                       
         if epoch % config['save_iter'] == 0 and epoch != 0:
             ckpt = trainer.save(config, epoch)
-            torch.save(ckpt, os.path.join(checkpoints_path, 'ckpt_' + '{0:05d}_epoch'.format(epoch) + '.pth'))
+            torch.save(ckpt, os.path.join(checkpoints_path, 'ckpt_' + args.data_path + '_{0:05d}_epoch'.format(epoch) + '.pth'))
         
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Training stylizer")
     parser.add_argument('-c', '--config_path', type=str, default='configs/config.yaml', help='config file path')
-    parser.add_argument('-d', '--data_path', type=str, default='data/hotdog', help='config file path')
+    parser.add_argument('-d', '--data_path', type=str, default='hotdog', help='config file path')
     args = parser.parse_args()
     
     try:
